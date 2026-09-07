@@ -1,0 +1,223 @@
+// Prepaid Card Inventory — data model
+//
+// Design note: because physical stock sits on vessels and in remote offices,
+// the system deliberately separates two different truths:
+//   1. the BOOK position  — what the system believes, driven by movements
+//   2. the VERIFIED position — what a human last physically confirmed, via a stock count
+// Card.lastVerifiedAt and Location.countIntervalDays exist to surface the gap
+// between the two, so nobody mistakes a stale record for a confirmed one.
+//
+// SQLite does not support Prisma enums, so status-like fields are Strings.
+// The allowed values live in src/lib/constants.ts and are validated there.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Location {
+  id           String  @id @default(cuid())
+  code         String  @unique
+  name         String
+  type         String // VESSEL | OFFICE | WAREHOUSE | AGENT | TRANSIT
+  region       String?
+  vesselImo    String?
+  contactName  String?
+  contactEmail String?
+
+  // Alerting thresholds
+  reorderPoint      Int @default(0) // raise a low-stock alert at or below this on-hand count
+  countIntervalDays Int @default(90) // how often this location is expected to physically count
+
+  isActive  Boolean  @default(true)
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  cards         Card[]
+  movementsFrom Movement[]   @relation("MovementFrom")
+  movementsTo   Movement[]   @relation("MovementTo")
+  stockCounts   StockCount[]
+
+  @@index([type])
+  @@index([isActive])
+}
+
+model CardType {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  name        String
+  currency    String   @default("USD")
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  cards Card[]
+}
+
+model Card {
+  id     String @id @default(cuid())
+  serial String @unique // the card's primary physical identifier (serial / card reference)
+
+  // Never store a full PAN. Only the last 4 digits, for operator recognition.
+  maskedPan String?
+  proxy     String? // proxy / token / reference number from the issuer file
+
+  cardTypeId String
+  cardType   CardType @relation(fields: [cardTypeId], references: [id])
+
+  locationId String? // null = whereabouts unknown / not yet allocated
+  location   Location? @relation(fields: [locationId], references: [id])
+
+  status   String // see CARD_STATUSES in src/lib/constants.ts
+  batchRef String? // shipment / production batch reference
+
+  expiryDate  DateTime?
+  activatedAt DateTime?
+  issuedTo    String? // crew member or employee reference
+  issuedAt    DateTime?
+
+  // Physical-verification trail — the whole point of the app.
+  lastVerifiedAt DateTime?
+  lastVerifiedBy String?
+
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  movements       Movement[]
+  stockCountLines StockCountLine[]
+
+  @@index([status])
+  @@index([locationId])
+  @@index([cardTypeId])
+  @@index([batchRef])
+  @@index([lastVerifiedAt])
+}
+
+model Movement {
+  id     String @id @default(cuid())
+  cardId String
+  card   Card   @relation(fields: [cardId], references: [id], onDelete: Cascade)
+
+  type String // see MOVEMENT_TYPES in src/lib/constants.ts
+
+  fromLocationId String?
+  fromLocation   Location? @relation("MovementFrom", fields: [fromLocationId], references: [id])
+  toLocationId   String?
+  toLocation     Location? @relation("MovementTo", fields: [toLocationId], references: [id])
+
+  fromStatus String?
+  toStatus   String?
+
+  reference String? // shipment ref, waybill, count ref
+  actor     String  @default("system")
+  notes     String?
+
+  occurredAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+
+  importBatchId String?
+  importBatch   ImportBatch? @relation(fields: [importBatchId], references: [id], onDelete: SetNull)
+
+  stockCountId String?
+  stockCount   StockCount? @relation(fields: [stockCountId], references: [id], onDelete: SetNull)
+
+  @@index([cardId])
+  @@index([occurredAt])
+  @@index([type])
+}
+
+model ImportBatch {
+  id         String  @id @default(cuid())
+  filename   String
+  sheetName  String?
+  uploadedBy String  @default("HQ")
+  status     String  @default("COMMITTED") // COMMITTED | FAILED
+  mode       String  @default("UPSERT") // UPSERT | CREATE_ONLY | UPDATE_ONLY
+
+  rowsTotal   Int @default(0)
+  rowsCreated Int @default(0)
+  rowsUpdated Int @default(0)
+  rowsSkipped Int @default(0)
+  rowsErrored Int @default(0)
+
+  mappingJson String @default("{}")
+  errorsJson  String @default("[]")
+
+  createdAt DateTime @default(now())
+
+  movements Movement[]
+}
+
+// A reusable column-mapping template, so the same monthly spreadsheet layout
+// does not have to be re-mapped by hand every time.
+model ImportMapping {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  mappingJson String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model StockCount {
+  id         String   @id @default(cuid())
+  reference  String   @unique
+  locationId String
+  location   Location @relation(fields: [locationId], references: [id])
+
+  countDate DateTime @default(now())
+  countedBy String
+  status    String   @default("DRAFT") // DRAFT | SUBMITTED | RECONCILED
+  notes     String?
+
+  submittedAt  DateTime?
+  reconciledAt DateTime?
+  reconciledBy String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  lines     StockCountLine[]
+  movements Movement[]
+
+  @@index([locationId])
+  @@index([status])
+}
+
+model StockCountLine {
+  id           String     @id @default(cuid())
+  stockCountId String
+  stockCount   StockCount @relation(fields: [stockCountId], references: [id], onDelete: Cascade)
+
+  serial String
+  cardId String?
+  card   Card?   @relation(fields: [cardId], references: [id], onDelete: SetNull)
+
+  // MATCH      — expected here and physically seen
+  // MISSING    — system says it is here, nobody saw it
+  // UNEXPECTED — physically seen here, system had it somewhere else (or does not know it)
+  result String
+
+  systemStatus     String?
+  systemLocationId String?
+  resolution       String? // what the reconciliation did with this line
+  resolved         Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  @@index([stockCountId])
+  @@index([result])
+}
+
+model Setting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
