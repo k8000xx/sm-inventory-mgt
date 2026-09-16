@@ -1,14 +1,21 @@
 {
   "name": "Prepaid Card Administration",
   "image": "mcr.microsoft.com/devcontainers/javascript-node:22",
-  "postCreateCommand": "npm install && cp -n .env.example .env || true && npm run setup",
-  "forwardPorts": [3000],
+
+  // Install, create .env if it is missing, then migrate and seed. Chained with
+  // && so a failed install stops the sequence instead of seeding a broken tree.
+  "postCreateCommand": "bash -lc 'npm install && { [ -f .env ] || cp .env.example .env; } && npm run setup'",
+
+  // Port 3000 is deliberately NOT pre-forwarded: forwarding it before anything
+  // listens just opens a preview tab that cannot connect. Codespaces detects the
+  // port by itself once `npm run dev` starts, and notifies rather than opening.
   "portsAttributes": {
     "3000": {
       "label": "App",
-      "onAutoForward": "openPreview"
+      "onAutoForward": "notify"
     }
   },
+
   "customizations": {
     "vscode": {
       "extensions": ["Prisma.prisma", "dbaeumer.vscode-eslint", "bradlc.vscode-tailwindcss"]

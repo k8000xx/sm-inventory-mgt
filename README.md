@@ -16,6 +16,22 @@ Two ideas shape the whole system:
 
 ## Running it
 
+### In the browser, with nothing installed
+
+Open the repo on GitHub → **Code → Codespaces → Create codespace**. The
+devcontainer brings up Node 22, installs dependencies, and migrates and seeds
+the database for you. When it finishes, run:
+
+```bash
+npm run dev
+```
+
+Codespaces then notices port 3000 and offers to open it. Port 3000 is not
+pre-forwarded on purpose — forwarding it before the dev server is listening
+just produces a preview tab that cannot connect.
+
+### Locally
+
 ```bash
 npm install
 cp .env.example .env      # DATABASE_URL="file:./dev.db"
