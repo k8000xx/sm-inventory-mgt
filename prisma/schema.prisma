@@ -1,11 +1,16 @@
-// Prepaid Card Inventory — data model
+// Prepaid Card Administration — data model
 //
-// Design note: because physical stock sits on vessels and in remote offices,
-// the system deliberately separates two different truths:
-//   1. the BOOK position  — what the system believes, driven by movements
-//   2. the VERIFIED position — what a human last physically confirmed, via a stock count
-// Card.lastVerifiedAt and Location.countIntervalDays exist to surface the gap
-// between the two, so nobody mistakes a stale record for a confirmed one.
+// Two ideas drive the shape of this schema.
+//
+// 1. Because physical stock sits on vessels and in remote offices, the BOOK
+//    position (what the movement ledger says) is kept separate from the
+//    VERIFIED position (what a human last physically confirmed). Card
+//    .lastVerifiedAt and Location.countIntervalDays exist to surface the gap,
+//    so a stale record is never mistaken for a confirmed one.
+//
+// 2. Cards are client-owned from the moment they are ordered. A CardOrder is
+//    placed for a Client with an Issuer, and its serial ranges become real Card
+//    rows when the order is received — that is the only way stock is injected.
 //
 // SQLite does not support Prisma enums, so status-like fields are Strings.
 // The allowed values live in src/lib/constants.ts and are validated there.
@@ -19,6 +24,51 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+/// A customer of the card programme — typically a shipping company or fleet
+/// operator. Their vessels, cardholders, orders and card stock all hang off here.
+model Client {
+  id           String  @id @default(cuid())
+  code         String  @unique
+  name         String
+  registeredNo String?
+  country      String?
+  contactName  String?
+  contactEmail String?
+  contactPhone String?
+
+  isActive  Boolean  @default(true)
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  locations   Location[]
+  cards       Card[]
+  cardholders Cardholder[]
+  orders      CardOrder[]
+  deliveries  Delivery[]
+
+  @@index([isActive])
+}
+
+/// The bank or processor that issues the cards — Monavate, FAB, and whoever
+/// comes next. Products belong to an issuer, and orders are placed with one.
+model Issuer {
+  id           String  @id @default(cuid())
+  code         String  @unique
+  name         String
+  description  String?
+  /// Who to chase about an order.
+  contactName  String?
+  contactEmail String?
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  cardTypes CardType[]
+  orders    CardOrder[]
+}
+
 model Location {
   id           String  @id @default(cuid())
   code         String  @unique
@@ -29,6 +79,10 @@ model Location {
   contactName  String?
   contactEmail String?
 
+  /// Null for locations we own outright, such as HQ or a warehouse.
+  clientId String?
+  client   Client? @relation(fields: [clientId], references: [id])
+
   // Alerting thresholds
   reorderPoint      Int @default(0) // raise a low-stock alert at or below this on-hand count
   countIntervalDays Int @default(90) // how often this location is expected to physically count
@@ -38,26 +92,75 @@ model Location {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  cards         Card[]
-  movementsFrom Movement[]   @relation("MovementFrom")
-  movementsTo   Movement[]   @relation("MovementTo")
-  stockCounts   StockCount[]
+  cards           Card[]
+  movementsFrom   Movement[]   @relation("MovementFrom")
+  movementsTo     Movement[]   @relation("MovementTo")
+  stockCounts     StockCount[]
+  ordersDeliverTo CardOrder[]
+  deliveriesFrom  Delivery[]   @relation("DeliveryFrom")
+  deliveriesTo    Delivery[]   @relation("DeliveryTo")
+  disposals       Disposal[]
+  cardholders     Cardholder[]
 
   @@index([type])
   @@index([isActive])
+  @@index([clientId])
 }
 
 model CardType {
-  id          String   @id @default(cuid())
-  code        String   @unique
-  name        String
+  id   String @id @default(cuid())
+  code String @unique
+  name String
+
+  issuerId String
+  issuer   Issuer @relation(fields: [issuerId], references: [id])
+
+  /// Bank Identification Number / product BIN, where the issuer gives one.
+  bin String?
+
   currency    String   @default("USD")
   description String?
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  cards      Card[]
+  orderLines CardOrderLine[]
+
+  @@index([issuerId])
+}
+
+/// The person a card is issued to — a seafarer or other end customer. Holds
+/// personal data, so it is kept to what card administration actually needs.
+model Cardholder {
+  id String @id @default(cuid())
+
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id])
+
+  /// The client's own reference for this person: crew or employee number.
+  ref         String
+  firstName   String
+  lastName    String
+  rank        String?
+  nationality String?
+  email       String?
+  phone       String?
+
+  /// The vessel or office this person is normally attached to.
+  locationId String?
+  location   Location? @relation(fields: [locationId], references: [id])
+
+  isActive  Boolean  @default(true)
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   cards Card[]
+
+  @@unique([clientId, ref])
+  @@index([clientId])
+  @@index([lastName])
 }
 
 model Card {
@@ -71,18 +174,40 @@ model Card {
   cardTypeId String
   cardType   CardType @relation(fields: [cardTypeId], references: [id])
 
+  /// Which client's stock this card belongs to. Set when an order is received
+  /// and carried for the life of the card.
+  clientId String?
+  client   Client? @relation(fields: [clientId], references: [id])
+
   locationId String? // null = whereabouts unknown / not yet allocated
   location   Location? @relation(fields: [locationId], references: [id])
+
+  /// The person holding the card, once it has been issued.
+  cardholderId String?
+  cardholder   Cardholder? @relation(fields: [cardholderId], references: [id])
+
+  /// The order line that brought this card into inventory.
+  orderLineId String?
+  orderLine   CardOrderLine? @relation(fields: [orderLineId], references: [id])
 
   status   String // see CARD_STATUSES in src/lib/constants.ts
   batchRef String? // shipment / production batch reference
 
-  expiryDate  DateTime?
-  activatedAt DateTime?
-  issuedTo    String? // crew member or employee reference
-  issuedAt    DateTime?
+  expiryDate DateTime?
+  issuedTo   String? // free-text holder name, kept for imports that carry no cardholder record
+  issuedAt   DateTime?
 
-  // Physical-verification trail — the whole point of the app.
+  /// Registration is the single "card is live" milestone — a registered card is
+  /// no longer available stock.
+  registeredAt DateTime?
+
+  /// Set when a delivery to a vessel or office was confirmed received.
+  deliveredAt DateTime?
+
+  disposedAt     DateTime?
+  disposalReason String?
+
+  // Physical-verification trail.
   lastVerifiedAt DateTime?
   lastVerifiedBy String?
 
@@ -90,12 +215,17 @@ model Card {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  movements       Movement[]
-  stockCountLines StockCountLine[]
+  movements         Movement[]
+  stockCountLines   StockCountLine[]
+  deliveryLines     DeliveryLine[]
+  disposalLines     DisposalLine[]
+  registrationLines RegistrationLine[]
 
   @@index([status])
   @@index([locationId])
   @@index([cardTypeId])
+  @@index([clientId])
+  @@index([cardholderId])
   @@index([batchRef])
   @@index([lastVerifiedAt])
 }
@@ -128,9 +258,227 @@ model Movement {
   stockCountId String?
   stockCount   StockCount? @relation(fields: [stockCountId], references: [id], onDelete: SetNull)
 
+  cardOrderId String?
+  cardOrder   CardOrder? @relation(fields: [cardOrderId], references: [id], onDelete: SetNull)
+
+  deliveryId String?
+  delivery   Delivery? @relation(fields: [deliveryId], references: [id], onDelete: SetNull)
+
+  disposalId String?
+  disposal   Disposal? @relation(fields: [disposalId], references: [id], onDelete: SetNull)
+
+  registrationBatchId String?
+  registrationBatch   RegistrationBatch? @relation(fields: [registrationBatchId], references: [id], onDelete: SetNull)
+
   @@index([cardId])
   @@index([occurredAt])
   @@index([type])
+}
+
+/// A card order placed with an issuer on a client's behalf. Receiving an order
+/// is the only route by which new stock enters the system.
+model CardOrder {
+  id        String @id @default(cuid())
+  reference String @unique
+
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id])
+
+  issuerId String
+  issuer   Issuer @relation(fields: [issuerId], references: [id])
+
+  /// Where the physical cards are expected to land.
+  deliverToLocationId String
+  deliverToLocation   Location @relation(fields: [deliverToLocationId], references: [id])
+
+  status String @default("DRAFT") // DRAFT | SUBMITTED | IN_PRODUCTION | SHIPPED | PARTIALLY_RECEIVED | RECEIVED | CANCELLED
+
+  orderedAt  DateTime  @default(now())
+  expectedAt DateTime?
+  receivedAt DateTime?
+
+  placedBy String  @default("HQ")
+  notes    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  lines     CardOrderLine[]
+  movements Movement[]
+
+  @@index([clientId])
+  @@index([issuerId])
+  @@index([status])
+}
+
+/// One product line of an order, carrying the serial range the issuer allocated.
+/// Receiving the line expands that range into Card rows.
+model CardOrderLine {
+  id      String    @id @default(cuid())
+  orderId String
+  order   CardOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  cardTypeId String
+  cardType   CardType @relation(fields: [cardTypeId], references: [id])
+
+  /// Inclusive serial range. Both ends share a length and a non-numeric prefix;
+  /// the numeric tail is what gets counted. See src/lib/serials.ts.
+  serialStart String
+  serialEnd   String
+
+  /// Derived from the range at save time, so quantity and range cannot disagree.
+  quantity Int
+
+  receivedQuantity Int       @default(0)
+  batchRef         String?
+  expiryDate       DateTime?
+  notes            String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  cards Card[]
+
+  @@index([orderId])
+}
+
+/// A physical shipment of cards to a vessel or office. Cards go IN_TRANSIT on
+/// dispatch and only land on the destination's books when receipt is confirmed.
+model Delivery {
+  id        String @id @default(cuid())
+  reference String @unique
+
+  clientId String?
+  client   Client? @relation(fields: [clientId], references: [id])
+
+  fromLocationId String
+  fromLocation   Location @relation("DeliveryFrom", fields: [fromLocationId], references: [id])
+
+  toLocationId String
+  toLocation   Location @relation("DeliveryTo", fields: [toLocationId], references: [id])
+
+  status String @default("DRAFT") // DRAFT | DISPATCHED | RECEIVED | CANCELLED
+
+  dispatchedAt DateTime?
+  dispatchedBy String?
+  expectedAt   DateTime?
+  receivedAt   DateTime?
+  receivedBy   String?
+
+  carrier     String?
+  trackingRef String?
+  notes       String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  lines     DeliveryLine[]
+  movements Movement[]
+
+  @@index([toLocationId])
+  @@index([status])
+}
+
+model DeliveryLine {
+  id         String   @id @default(cuid())
+  deliveryId String
+  delivery   Delivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+
+  cardId String
+  card   Card   @relation(fields: [cardId], references: [id], onDelete: Cascade)
+
+  /// False when a card on the manifest did not arrive with the rest.
+  received Boolean @default(false)
+  note     String?
+
+  @@unique([deliveryId, cardId])
+  @@index([deliveryId])
+}
+
+/// A batch of cards taken permanently out of circulation, with the paper trail
+/// an auditor will ask for.
+model Disposal {
+  id        String @id @default(cuid())
+  reference String @unique
+
+  locationId String
+  location   Location @relation(fields: [locationId], references: [id])
+
+  /// DAMAGED | EXPIRED | RECALLED | FRAUD | OBSOLETE | OTHER
+  reason String
+  /// SHREDDED | RETURNED_TO_ISSUER | INCINERATED | OTHER
+  method String
+
+  disposedAt     DateTime @default(now())
+  disposedBy     String
+  witnessedBy    String?
+  certificateRef String?
+  notes          String?
+
+  createdAt DateTime @default(now())
+
+  lines     DisposalLine[]
+  movements Movement[]
+
+  @@index([locationId])
+}
+
+model DisposalLine {
+  id         String   @id @default(cuid())
+  disposalId String
+  disposal   Disposal @relation(fields: [disposalId], references: [id], onDelete: Cascade)
+
+  cardId String
+  card   Card   @relation(fields: [cardId], references: [id], onDelete: Cascade)
+
+  @@unique([disposalId, cardId])
+  @@index([disposalId])
+}
+
+/// A batch of cards reported as registered. Registration is the milestone that
+/// takes a card out of available stock.
+model RegistrationBatch {
+  id        String @id @default(cuid())
+  reference String @unique
+
+  /// PASTE | FILE | MANUAL — how the serials reached the system.
+  source String @default("PASTE")
+
+  registeredOn DateTime @default(now())
+  recordedBy   String
+  notes        String?
+
+  linesTotal      Int @default(0)
+  linesRegistered Int @default(0)
+  linesSkipped    Int @default(0)
+  linesRejected   Int @default(0)
+
+  createdAt DateTime @default(now())
+
+  lines     RegistrationLine[]
+  movements Movement[]
+}
+
+model RegistrationLine {
+  id      String            @id @default(cuid())
+  batchId String
+  batch   RegistrationBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  serial String
+  cardId String?
+  card   Card?   @relation(fields: [cardId], references: [id], onDelete: SetNull)
+
+  /// REGISTERED | ALREADY_REGISTERED | NOT_FOUND | REJECTED
+  result String
+  note   String?
+
+  /// Cardholder reference supplied alongside the serial, if any.
+  cardholderRef String?
+
+  createdAt DateTime @default(now())
+
+  @@index([batchId])
+  @@index([result])
 }
 
 model ImportBatch {
@@ -155,8 +503,8 @@ model ImportBatch {
   movements Movement[]
 }
 
-// A reusable column-mapping template, so the same monthly spreadsheet layout
-// does not have to be re-mapped by hand every time.
+/// A reusable column-mapping template, so the same monthly spreadsheet layout
+/// does not have to be re-mapped by hand every time.
 model ImportMapping {
   id          String   @id @default(cuid())
   name        String   @unique
@@ -207,7 +555,7 @@ model StockCountLine {
 
   systemStatus     String?
   systemLocationId String?
-  resolution       String? // what the reconciliation did with this line
+  resolution       String?
   resolved         Boolean @default(false)
 
   createdAt DateTime @default(now())

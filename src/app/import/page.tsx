@@ -7,9 +7,11 @@ import { ImportWizard } from './wizard';
 export const dynamic = 'force-dynamic';
 
 export default async function ImportPage() {
-  const [locations, cardTypes, savedMappings, history] = await Promise.all([
+  const [locations, cardTypes, clients, issuers, savedMappings, history] = await Promise.all([
     prisma.location.findMany({ where: { isActive: true }, orderBy: { name: 'asc' }, select: { id: true, name: true, code: true } }),
     prisma.cardType.findMany({ where: { isActive: true }, orderBy: { name: 'asc' }, select: { id: true, name: true } }),
+    prisma.client.findMany({ where: { isActive: true }, orderBy: { name: 'asc' }, select: { id: true, name: true, code: true } }),
+    prisma.issuer.findMany({ where: { isActive: true }, orderBy: { name: 'asc' }, select: { id: true, name: true } }),
     prisma.importMapping.findMany({ orderBy: { updatedAt: 'desc' }, select: { id: true, name: true, mappingJson: true } }),
     prisma.importBatch.findMany({ orderBy: { createdAt: 'desc' }, take: 10 }),
   ]);
@@ -29,7 +31,13 @@ export default async function ImportPage() {
         </Alert>
       </div>
 
-      <ImportWizard locations={locations} cardTypes={cardTypes} savedMappings={savedMappings} />
+      <ImportWizard
+        locations={locations}
+        cardTypes={cardTypes}
+        clients={clients}
+        issuers={issuers}
+        savedMappings={savedMappings}
+      />
 
       {history.length > 0 && (
         <div className="mt-6">

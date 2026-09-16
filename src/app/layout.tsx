@@ -3,8 +3,8 @@ import { Nav } from '@/components/nav';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Prepaid Card Inventory',
-  description: 'Track prepaid card stock across vessels, offices and other remote locations.',
+  title: 'Prepaid Card Administration',
+  description: 'Administer prepaid card programmes across clients, vessels, offices and issuers.',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

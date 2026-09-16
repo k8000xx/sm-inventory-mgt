@@ -9,10 +9,13 @@ import { createLocation, setLocationActive } from './actions';
 export const dynamic = 'force-dynamic';
 
 export default async function LocationsPage() {
-  const [positions, inactive] = await Promise.all([
+  const [positions, inactive, clients, locationClients] = await Promise.all([
     getLocationPositions(),
     prisma.location.findMany({ where: { isActive: false }, orderBy: { name: 'asc' } }),
+    prisma.client.findMany({ where: { isActive: true }, orderBy: { name: 'asc' }, select: { id: true, name: true, code: true } }),
+    prisma.location.findMany({ select: { id: true, client: { select: { id: true, name: true } } } }),
   ]);
+  const clientOf = new Map(locationClients.map((l) => [l.id, l.client]));
 
   return (
     <>
@@ -30,6 +33,7 @@ export default async function LocationsPage() {
                   <tr>
                     <th className="th">Location</th>
                     <th className="th">Type</th>
+                    <th className="th">Client</th>
                     <th className="th">Region</th>
                     <th className="th text-right">On hand</th>
                     <th className="th text-right">Total</th>
@@ -47,6 +51,15 @@ export default async function LocationsPage() {
                         <span className="ml-1.5 text-xs text-slate-400">{p.code}</span>
                       </td>
                       <td className="td"><LocationBadge type={p.type} /></td>
+                      <td className="td text-slate-500">
+                        {clientOf.get(p.id) ? (
+                          <Link href={`/clients/${clientOf.get(p.id)!.id}`} className="hover:underline">
+                            {clientOf.get(p.id)!.name}
+                          </Link>
+                        ) : (
+                          <span className="text-slate-400">Own site</span>
+                        )}
+                      </td>
                       <td className="td text-slate-500">{p.region ?? '—'}</td>
                       <td className={`td text-right tabular-nums ${p.lowStock ? 'font-semibold text-red-700' : ''}`}>
                         {formatNumber(p.onHand)}
@@ -77,7 +90,7 @@ export default async function LocationsPage() {
                   ))}
                   {positions.length === 0 && (
                     <tr>
-                      <td colSpan={7}>
+                      <td colSpan={8}>
                         <EmptyState title="No locations yet" hint="Add your first vessel or office on the right." />
                       </td>
                     </tr>
@@ -113,7 +126,7 @@ export default async function LocationsPage() {
         </div>
 
         <Panel title="Add a location">
-          <LocationForm action={createLocation} submitLabel="Add location" />
+          <LocationForm action={createLocation} clients={clients} submitLabel="Add location" />
         </Panel>
       </div>
     </>

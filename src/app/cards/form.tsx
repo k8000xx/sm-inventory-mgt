@@ -11,13 +11,15 @@ export type CardFormValues = {
   cardTypeId?: string;
   status?: string;
   locationId?: string | null;
+  clientId?: string | null;
+  cardholderId?: string | null;
   proxy?: string | null;
   maskedPan?: string | null;
   batchRef?: string | null;
   issuedTo?: string | null;
   expiryDate?: Date | string | null;
   issuedAt?: Date | string | null;
-  activatedAt?: Date | string | null;
+  registeredAt?: Date | string | null;
   notes?: string | null;
 };
 
@@ -41,12 +43,16 @@ export function CardForm({
   values,
   locations,
   cardTypes,
+  clients,
+  cardholders,
   submitLabel,
 }: {
   action: (prev: ActionState, formData: FormData) => Promise<ActionState>;
   values?: CardFormValues;
   locations: { id: string; name: string; code: string }[];
   cardTypes: { id: string; name: string }[];
+  clients: { id: string; name: string; code: string }[];
+  cardholders: { id: string; label: string }[];
   submitLabel: string;
 }) {
   const [state, formAction] = useActionState<ActionState, FormData>(action, {});
@@ -92,6 +98,27 @@ export function CardForm({
         </div>
       </div>
 
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div>
+          <label className="label" htmlFor="c-client">Client</label>
+          <select id="c-client" name="clientId" className="input" defaultValue={values?.clientId ?? ''}>
+            <option value="">Unassigned</option>
+            {clients.map((c) => (
+              <option key={c.id} value={c.id}>{c.name} ({c.code})</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="label" htmlFor="c-holder">Cardholder</label>
+          <select id="c-holder" name="cardholderId" className="input" defaultValue={values?.cardholderId ?? ''}>
+            <option value="">None</option>
+            {cardholders.map((h) => (
+              <option key={h.id} value={h.id}>{h.label}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
       <div className="grid gap-3 sm:grid-cols-3">
         <div>
           <label className="label" htmlFor="c-proxy">Proxy / reference</label>
@@ -131,8 +158,9 @@ export function CardForm({
           <input id="c-issuedat" name="issuedAt" type="date" className="input" defaultValue={asDateInput(values?.issuedAt)} />
         </div>
         <div>
-          <label className="label" htmlFor="c-activated">Activation date</label>
-          <input id="c-activated" name="activatedAt" type="date" className="input" defaultValue={asDateInput(values?.activatedAt)} />
+          <label className="label" htmlFor="c-registered">Registration date</label>
+          <input id="c-registered" name="registeredAt" type="date" className="input" defaultValue={asDateInput(values?.registeredAt)} />
+          <p className="mt-1 text-xs text-slate-500">A registered card is live and no longer available stock.</p>
         </div>
       </div>
 

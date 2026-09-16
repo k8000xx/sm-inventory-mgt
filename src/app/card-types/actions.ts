@@ -7,6 +7,8 @@ import { prisma } from '@/lib/db';
 const schema = z.object({
   code: z.string().trim().min(1, 'Code is required').max(40),
   name: z.string().trim().min(1, 'Name is required').max(120),
+  issuerId: z.string().trim().min(1, 'Choose the issuer for this product'),
+  bin: z.string().trim().max(12).optional(),
   currency: z.string().trim().length(3, 'Use a 3-letter currency code').toUpperCase(),
   description: z.string().trim().max(500).optional(),
 });
@@ -17,6 +19,8 @@ export async function createCardType(_prev: ActionState, formData: FormData): Pr
   const parsed = schema.safeParse({
     code: formData.get('code'),
     name: formData.get('name'),
+    issuerId: formData.get('issuerId'),
+    bin: formData.get('bin') || undefined,
     currency: formData.get('currency') || 'USD',
     description: formData.get('description') || undefined,
   });

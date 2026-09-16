@@ -5,11 +5,16 @@ import { useActionState, useMemo, useState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { Alert, StatusBadge } from '@/components/ui';
 import { CARD_STATUSES, CARD_STATUS_LABELS } from '@/lib/constants';
-import { bulkStatus, bulkTransfer, type ActionState } from './actions';
+import { bulkIssue, bulkStatus, bulkTransfer, type ActionState } from './actions';
 
 export type CardRow = {
   id: string;
   serial: string;
+  clientName: string | null;
+  clientId: string | null;
+  cardholderName: string | null;
+  cardholderId: string | null;
+  issuerName: string;
   maskedPan: string | null;
   status: string;
   batchRef: string | null;
@@ -35,15 +40,18 @@ function Submit({ label }: { label: string }) {
 export function CardsTable({
   rows,
   locations,
+  cardholders,
 }: {
   rows: CardRow[];
   locations: { id: string; name: string; code: string }[];
+  cardholders: { id: string; label: string }[];
 }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [mode, setMode] = useState<'none' | 'transfer' | 'status'>('none');
+  const [mode, setMode] = useState<'none' | 'transfer' | 'status' | 'issue'>('none');
 
   const [transferState, transferAction] = useActionState<ActionState, FormData>(bulkTransfer, {});
   const [statusState, statusAction] = useActionState<ActionState, FormData>(bulkStatus, {});
+  const [issueState, issueAction] = useActionState<ActionState, FormData>(bulkIssue, {});
 
   const allSelected = rows.length > 0 && selected.size === rows.length;
   const selectedIds = useMemo(() => [...selected], [selected]);
@@ -73,6 +81,9 @@ export function CardsTable({
             <button type="button" className="btn-secondary" onClick={() => setMode(mode === 'status' ? 'none' : 'status')}>
               Change status
             </button>
+            <button type="button" className="btn-secondary" onClick={() => setMode(mode === 'issue' ? 'none' : 'issue')}>
+              Issue to cardholder
+            </button>
             <button type="button" className="btn-secondary" onClick={() => { setSelected(new Set()); setMode('none'); }}>
               Clear
             </button>
@@ -82,6 +93,8 @@ export function CardsTable({
           {transferState.success && <div className="mt-2"><Alert tone="good">{transferState.success}</Alert></div>}
           {statusState.error && <div className="mt-2"><Alert tone="danger">{statusState.error}</Alert></div>}
           {statusState.success && <div className="mt-2"><Alert tone="good">{statusState.success}</Alert></div>}
+          {issueState.error && <div className="mt-2"><Alert tone="danger">{issueState.error}</Alert></div>}
+          {issueState.success && <div className="mt-2"><Alert tone="good">{issueState.success}</Alert></div>}
 
           {mode === 'transfer' && (
             <form action={transferAction} className="mt-3 grid gap-2 sm:grid-cols-5">
@@ -101,6 +114,23 @@ export function CardsTable({
                 Mark in transit
               </label>
               <Submit label="Move cards" />
+            </form>
+          )}
+
+          {mode === 'issue' && (
+            <form action={issueAction} className="mt-3 grid gap-2 sm:grid-cols-5">
+              {selectedIds.map((id) => (
+                <input key={id} type="hidden" name="cardIds" value={id} />
+              ))}
+              <select name="cardholderId" className="input sm:col-span-2" required defaultValue="">
+                <option value="" disabled>Cardholder…</option>
+                {cardholders.map((h) => (
+                  <option key={h.id} value={h.id}>{h.label}</option>
+                ))}
+              </select>
+              <input name="issuedAt" type="date" className="input" defaultValue={new Date().toISOString().slice(0, 10)} />
+              <input name="actor" className="input" placeholder="Your name" defaultValue="HQ" />
+              <Submit label="Issue cards" />
             </form>
           )}
 
@@ -132,9 +162,11 @@ export function CardsTable({
               </th>
               <th className="th">Serial</th>
               <th className="th">Type</th>
+              <th className="th">Issuer</th>
+              <th className="th">Client</th>
               <th className="th">Location</th>
               <th className="th">Status</th>
-              <th className="th">Issued to</th>
+              <th className="th">Cardholder</th>
               <th className="th">Batch</th>
               <th className="th">Expiry</th>
               <th className="th">Verified</th>
@@ -159,6 +191,14 @@ export function CardsTable({
                   {r.maskedPan && <span className="ml-1.5 text-xs text-slate-400">••{r.maskedPan}</span>}
                 </td>
                 <td className="td text-slate-500">{r.cardTypeName}</td>
+                <td className="td text-slate-500">{r.issuerName}</td>
+                <td className="td text-slate-500">
+                  {r.clientId ? (
+                    <Link href={`/clients/${r.clientId}`} className="hover:underline">{r.clientName}</Link>
+                  ) : (
+                    <span className="text-slate-400">—</span>
+                  )}
+                </td>
                 <td className="td">
                   {r.locationId ? (
                     <Link href={`/locations/${r.locationId}`} className="text-slate-700 hover:underline">
@@ -169,7 +209,13 @@ export function CardsTable({
                   )}
                 </td>
                 <td className="td"><StatusBadge status={r.status} /></td>
-                <td className="td text-slate-500">{r.issuedTo ?? '—'}</td>
+                <td className="td text-slate-500">
+                  {r.cardholderId ? (
+                    <Link href={`/cardholders/${r.cardholderId}`} className="hover:underline">{r.cardholderName}</Link>
+                  ) : (
+                    r.issuedTo ?? '—'
+                  )}
+                </td>
                 <td className="td text-slate-500">{r.batchRef ?? '—'}</td>
                 <td className="td text-slate-500">{r.expiryDate ?? '—'}</td>
                 <td className="td">

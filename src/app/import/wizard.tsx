@@ -36,10 +36,14 @@ function StepButton({
 export function ImportWizard({
   locations,
   cardTypes,
+  clients,
+  issuers,
   savedMappings,
 }: {
   locations: Option[];
   cardTypes: Option[];
+  clients: Option[];
+  issuers: Option[];
   savedMappings: { id: string; name: string; mappingJson: string }[];
 }) {
   const [state, setState] = useState<ImportState>(INITIAL_IMPORT_STATE);
@@ -360,6 +364,32 @@ export function ImportWizard({
                   ))}
                 </select>
                 <p className="mt-1 text-xs text-slate-500">Required if the file has no card-type column.</p>
+              </div>
+
+              <div>
+                <label className="label" htmlFor="imp-defclient">Default client</label>
+                <select id="imp-defclient" name="defaultClientId" className="input" defaultValue="">
+                  <option value="">— none —</option>
+                  {clients.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}{c.code ? ` (${c.code})` : ''}</option>
+                  ))}
+                </select>
+                <p className="mt-1 text-xs text-slate-500">
+                  Used for rows with no client column. Cards are owned by a client.
+                </p>
+              </div>
+
+              <div>
+                <label className="label" htmlFor="imp-defissuer">Issuer for new card types</label>
+                <select id="imp-defissuer" name="defaultIssuerId" className="input" defaultValue="">
+                  <option value="">— none —</option>
+                  {issuers.map((i) => (
+                    <option key={i.id} value={i.id}>{i.name}</option>
+                  ))}
+                </select>
+                <p className="mt-1 text-xs text-slate-500">
+                  Required only if you let the import create card types below.
+                </p>
               </div>
 
               <div>

@@ -74,12 +74,12 @@ const STATUS_TONES: Record<CardStatus, string> = {
   IN_STOCK: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
   IN_TRANSIT: 'bg-sky-50 text-sky-700 ring-sky-200',
   ISSUED: 'bg-indigo-50 text-indigo-700 ring-indigo-200',
-  ACTIVATED: 'bg-violet-50 text-violet-700 ring-violet-200',
+  REGISTERED: 'bg-violet-50 text-violet-700 ring-violet-200',
   RETURNED: 'bg-teal-50 text-teal-700 ring-teal-200',
   LOST: 'bg-red-50 text-red-700 ring-red-200',
   DAMAGED: 'bg-orange-50 text-orange-700 ring-orange-200',
   EXPIRED: 'bg-slate-100 text-slate-600 ring-slate-200',
-  DESTROYED: 'bg-slate-100 text-slate-600 ring-slate-200',
+  DISPOSED: 'bg-slate-200 text-slate-700 ring-slate-300',
 };
 
 export function StatusBadge({ status }: { status: string }) {

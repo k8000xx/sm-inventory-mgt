@@ -7,16 +7,19 @@ import { toggleCardType } from './actions';
 export const dynamic = 'force-dynamic';
 
 export default async function CardTypesPage() {
-  const types = await prisma.cardType.findMany({
-    orderBy: { name: 'asc' },
-    include: { _count: { select: { cards: true } } },
-  });
+  const [types, issuers] = await Promise.all([
+    prisma.cardType.findMany({
+      orderBy: [{ issuer: { name: 'asc' } }, { name: 'asc' }],
+      include: { _count: { select: { cards: true } }, issuer: true },
+    }),
+    prisma.issuer.findMany({ where: { isActive: true }, orderBy: { name: 'asc' }, select: { id: true, name: true, code: true } }),
+  ]);
 
   return (
     <>
       <PageHeader
         title="Card types"
-        description="The products you stock. Imports match a spreadsheet's card-type column against these codes and names."
+        description="The products you stock, each belonging to an issuer. Imports match a spreadsheet's card-type column against these codes and names."
       />
 
       <div className="grid items-start gap-4 lg:grid-cols-3">
@@ -27,6 +30,8 @@ export default async function CardTypesPage() {
                 <tr>
                   <th className="th">Code</th>
                   <th className="th">Name</th>
+                  <th className="th">Issuer</th>
+                  <th className="th">BIN</th>
                   <th className="th">Currency</th>
                   <th className="th text-right">Cards</th>
                   <th className="th">Status</th>
@@ -40,6 +45,12 @@ export default async function CardTypesPage() {
                       {t.name}
                       {t.description && <div className="text-xs font-normal text-slate-500">{t.description}</div>}
                     </td>
+                    <td className="td">
+                      <span className="inline-flex rounded bg-slate-100 px-1.5 py-0.5 text-xs font-medium text-slate-700 ring-1 ring-inset ring-slate-200">
+                        {t.issuer.name}
+                      </span>
+                    </td>
+                    <td className="td font-mono text-xs text-slate-500">{t.bin ?? '—'}</td>
                     <td className="td">{t.currency}</td>
                     <td className="td text-right tabular-nums">{formatNumber(t._count.cards)}</td>
                     <td className="td">
@@ -58,7 +69,7 @@ export default async function CardTypesPage() {
                 ))}
                 {types.length === 0 && (
                   <tr>
-                    <td colSpan={5}>
+                    <td colSpan={7}>
                       <EmptyState
                         title="No card types yet"
                         hint="Add at least one before importing, or let the importer create them from your spreadsheet."
@@ -72,7 +83,7 @@ export default async function CardTypesPage() {
         </Panel>
 
         <Panel title="Add a card type">
-          <CardTypeForm />
+          <CardTypeForm issuers={issuers} />
         </Panel>
       </div>
     </>

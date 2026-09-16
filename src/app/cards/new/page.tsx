@@ -7,16 +7,19 @@ import { createCard } from '../actions';
 export const dynamic = 'force-dynamic';
 
 export default async function NewCardPage() {
-  const [locations, cardTypes] = await Promise.all([
+  const [locations, cardTypes, clients, cardholders] = await Promise.all([
     prisma.location.findMany({ where: { isActive: true }, orderBy: { name: 'asc' }, select: { id: true, name: true, code: true } }),
     prisma.cardType.findMany({ where: { isActive: true }, orderBy: { name: 'asc' }, select: { id: true, name: true } }),
+    prisma.client.findMany({ where: { isActive: true }, orderBy: { name: 'asc' }, select: { id: true, name: true, code: true } }),
+    prisma.cardholder.findMany({ where: { isActive: true }, orderBy: { lastName: 'asc' }, take: 500, select: { id: true, firstName: true, lastName: true, ref: true } }),
   ]);
+  const holderOptions = cardholders.map((h) => ({ id: h.id, label: `${h.lastName}, ${h.firstName} (${h.ref})` }));
 
   return (
     <>
       <PageHeader
         title="Add a card"
-        description="For one-off receipts and corrections. Bulk loads belong in the spreadsheet importer."
+        description="For one-off receipts and corrections. Bulk stock arrives through card orders, and bulk updates through the spreadsheet importer."
         action={<Link href="/cards" className="btn-secondary">Back to cards</Link>}
       />
 
@@ -36,7 +39,14 @@ export default async function NewCardPage() {
             </Alert>
           </div>
           <Panel title="Card details">
-            <CardForm action={createCard} locations={locations} cardTypes={cardTypes} submitLabel="Add card" />
+            <CardForm
+              action={createCard}
+              locations={locations}
+              cardTypes={cardTypes}
+              clients={clients}
+              cardholders={holderOptions}
+              submitLabel="Add card"
+            />
           </Panel>
         </div>
       )}

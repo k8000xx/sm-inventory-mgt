@@ -30,6 +30,14 @@ export async function GET(request: NextRequest) {
   if (location === 'none') filters.push({ locationId: null });
   else if (location) filters.push({ locationId: location });
   if (type) filters.push({ cardTypeId: type });
+  const client = sp.get('client') ?? '';
+  const issuer = sp.get('issuer') ?? '';
+  const order = sp.get('order') ?? '';
+  const cardholder = sp.get('cardholder') ?? '';
+  if (client) filters.push({ clientId: client });
+  if (issuer) filters.push({ cardType: { issuerId: issuer } });
+  if (cardholder) filters.push({ cardholderId: cardholder });
+  if (order) filters.push({ orderLine: { orderId: order } });
   if (stale) {
     filters.push({
       OR: [
@@ -41,14 +49,22 @@ export async function GET(request: NextRequest) {
 
   const cards = await prisma.card.findMany({
     where: filters.length > 0 ? { AND: filters } : {},
-    include: { cardType: true, location: true },
+    include: {
+      cardType: { include: { issuer: true } },
+      location: true,
+      client: true,
+      cardholder: true,
+      orderLine: { include: { order: { select: { reference: true } } } },
+    },
     orderBy: [{ location: { name: 'asc' } }, { serial: 'asc' }],
   });
 
   const csv = toCsv(
     [
-      'Serial', 'Proxy', 'Card number (last 4)', 'Card type', 'Currency', 'Location', 'Location code',
-      'Status', 'Batch', 'Issued to', 'Issue date', 'Activation date', 'Expiry date',
+      'Serial', 'Proxy', 'Card number (last 4)', 'Card type', 'Issuer', 'BIN', 'Currency',
+      'Client', 'Client code', 'Location', 'Location code', 'Status', 'Batch', 'Order',
+      'Cardholder', 'Cardholder ref', 'Rank', 'Issued to', 'Issue date', 'Delivered',
+      'Registered', 'Expiry date', 'Disposed', 'Disposal reason',
       'Last verified', 'Verified by', 'Notes',
     ],
     cards.map((c) => [
@@ -56,15 +72,26 @@ export async function GET(request: NextRequest) {
       c.proxy,
       c.maskedPan,
       c.cardType.name,
+      c.cardType.issuer.name,
+      c.cardType.bin,
       c.cardType.currency,
+      c.client?.name ?? '',
+      c.client?.code ?? '',
       c.location?.name ?? 'Unassigned',
       c.location?.code ?? '',
       c.status,
       c.batchRef,
+      c.orderLine?.order.reference ?? '',
+      c.cardholder ? `${c.cardholder.lastName}, ${c.cardholder.firstName}` : '',
+      c.cardholder?.ref ?? '',
+      c.cardholder?.rank ?? '',
       c.issuedTo,
       formatDate(c.issuedAt),
-      formatDate(c.activatedAt),
+      formatDate(c.deliveredAt),
+      formatDate(c.registeredAt),
       formatDate(c.expiryDate),
+      formatDate(c.disposedAt),
+      c.disposalReason,
       formatDate(c.lastVerifiedAt),
       c.lastVerifiedBy,
       c.notes,

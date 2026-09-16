@@ -14,11 +14,17 @@ export default async function CardDetailPage({ params }: { params: Promise<{ id:
 
   const card = await prisma.card.findUnique({
     where: { id },
-    include: { cardType: true, location: true },
+    include: {
+      cardType: { include: { issuer: true } },
+      location: true,
+      client: true,
+      cardholder: true,
+      orderLine: { include: { order: { select: { id: true, reference: true } } } },
+    },
   });
   if (!card) notFound();
 
-  const [movements, locations, cardTypes, countLines] = await Promise.all([
+  const [movements, locations, cardTypes, countLines, clients, cardholders] = await Promise.all([
     prisma.movement.findMany({
       where: { cardId: id },
       orderBy: [{ occurredAt: 'desc' }, { createdAt: 'desc' }],
@@ -37,6 +43,13 @@ export default async function CardDetailPage({ params }: { params: Promise<{ id:
       orderBy: { createdAt: 'desc' },
       take: 10,
     }),
+    prisma.client.findMany({ where: { isActive: true }, orderBy: { name: 'asc' }, select: { id: true, name: true, code: true } }),
+    prisma.cardholder.findMany({
+      where: { isActive: true, ...(card.clientId ? { clientId: card.clientId } : {}) },
+      orderBy: { lastName: 'asc' },
+      take: 500,
+      select: { id: true, firstName: true, lastName: true, ref: true },
+    }),
   ]);
 
   const verifiedDays = daysSince(card.lastVerifiedAt);
@@ -44,19 +57,53 @@ export default async function CardDetailPage({ params }: { params: Promise<{ id:
 
   const facts: [string, React.ReactNode][] = [
     ['Card type', card.cardType.name],
+    ['Issuer', card.cardType.issuer.name],
+    ['BIN', card.cardType.bin ?? '—'],
     ['Currency', card.cardType.currency],
+    [
+      'Client',
+      card.client ? (
+        <Link href={`/clients/${card.client.id}`} className="hover:underline">{card.client.name}</Link>
+      ) : (
+        <span className="text-amber-700">Unassigned</span>
+      ),
+    ],
+    [
+      'Cardholder',
+      card.cardholder ? (
+        <Link href={`/cardholders/${card.cardholder.id}`} className="hover:underline">
+          {card.cardholder.lastName}, {card.cardholder.firstName}
+        </Link>
+      ) : (
+        card.issuedTo ?? '—'
+      ),
+    ],
     ['Location', card.location ? <Link href={`/locations/${card.location.id}`} className="hover:underline">{card.location.name}</Link> : <span className="text-amber-700">Unassigned</span>],
     ['Status', <StatusBadge key="s" status={card.status} />],
     ['Card number', card.maskedPan ? `•••• ${card.maskedPan}` : '—'],
     ['Proxy', card.proxy ?? '—'],
     ['Batch', card.batchRef ?? '—'],
-    ['Issued to', card.issuedTo ?? '—'],
     ['Issue date', formatDate(card.issuedAt)],
-    ['Activation date', formatDate(card.activatedAt)],
+    ['Delivered onboard', formatDate(card.deliveredAt)],
+    [
+      'From order',
+      card.orderLine ? (
+        <Link href={`/orders/${card.orderLine.order.id}`} className="hover:underline">
+          {card.orderLine.order.reference}
+        </Link>
+      ) : (
+        '—'
+      ),
+    ],
+    ['Registered', formatDate(card.registeredAt)],
     ['Expiry', formatDate(card.expiryDate)],
     ['Last verified', card.lastVerifiedAt ? `${formatDate(card.lastVerifiedAt)} by ${card.lastVerifiedBy ?? 'unknown'}` : 'Never'],
     ['Created', formatDateTime(card.createdAt)],
   ];
+
+  if (card.disposedAt) {
+    facts.push(['Disposed', `${formatDate(card.disposedAt)}${card.disposalReason ? ` (${card.disposalReason})` : ''}`]);
+  }
 
   return (
     <>
@@ -66,7 +113,7 @@ export default async function CardDetailPage({ params }: { params: Promise<{ id:
         action={<Link href="/cards" className="btn-secondary">Back to cards</Link>}
       />
 
-      {stale && (
+      {stale && card.status !== 'DISPOSED' && card.status !== 'REGISTERED' && (
         <div className="mb-4">
           <Alert tone="warn" title="Not recently verified">
             {verifiedDays === null
@@ -95,6 +142,8 @@ export default async function CardDetailPage({ params }: { params: Promise<{ id:
             values={card}
             locations={locations}
             cardTypes={cardTypes}
+            clients={clients}
+            cardholders={cardholders.map((h) => ({ id: h.id, label: `${h.lastName}, ${h.firstName} (${h.ref})` }))}
             submitLabel="Save changes"
           />
         </Panel>

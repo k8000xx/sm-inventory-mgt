@@ -47,6 +47,8 @@ function readOptions(formData: FormData) {
       asOfDate,
       defaultLocationId: String(formData.get('defaultLocationId') ?? '') || null,
       defaultCardTypeId: String(formData.get('defaultCardTypeId') ?? '') || null,
+      defaultClientId: String(formData.get('defaultClientId') ?? '') || null,
+      defaultIssuerId: String(formData.get('defaultIssuerId') ?? '') || null,
       createMissingLocations: formData.get('createMissingLocations') === 'on',
       createMissingCardTypes: formData.get('createMissingCardTypes') === 'on',
       markVerified: formData.get('markVerified') === 'on',

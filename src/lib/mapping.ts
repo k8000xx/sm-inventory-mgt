@@ -6,13 +6,15 @@ export const IMPORT_FIELDS = [
   { key: 'proxy', label: 'Proxy / reference no.', required: false, hint: 'Issuer proxy or token reference.' },
   { key: 'pan', label: 'Card number (PAN)', required: false, hint: 'Only the last 4 digits are stored. The full number is discarded on import.' },
   { key: 'cardType', label: 'Card type', required: false, hint: 'Matched on card-type code, then name.' },
+  { key: 'client', label: 'Client', required: false, hint: 'Matched on client code, then name. Cards are owned by a client.' },
   { key: 'location', label: 'Location', required: false, hint: 'Matched on location code, then name.' },
+  { key: 'cardholderRef', label: 'Cardholder reference', required: false, hint: "The client's crew or employee number. Linked to an existing cardholder record." },
   { key: 'status', label: 'Status', required: false, hint: 'Free text is normalised, e.g. "available" becomes In stock.' },
   { key: 'batchRef', label: 'Batch / shipment ref', required: false, hint: '' },
   { key: 'expiryDate', label: 'Expiry date', required: false, hint: '' },
   { key: 'issuedTo', label: 'Issued to', required: false, hint: 'Crew member or employee reference.' },
   { key: 'issuedAt', label: 'Issue date', required: false, hint: '' },
-  { key: 'activatedAt', label: 'Activation date', required: false, hint: '' },
+  { key: 'registeredAt', label: 'Registration date', required: false, hint: 'Setting this registers the card, which removes it from available stock.' },
   { key: 'notes', label: 'Notes', required: false, hint: '' },
 ] as const;
 
@@ -26,13 +28,15 @@ const HEADER_SYNONYMS: Record<ImportFieldKey, string[]> = {
   proxy: ['proxy', 'proxyno', 'proxynumber', 'token', 'tokenid', 'reference', 'refno', 'externalid'],
   pan: ['pan', 'cardnumber', 'cardno', 'primaryaccountnumber', 'accountnumber', 'last4', 'lastfour'],
   cardType: ['cardtype', 'type', 'product', 'productname', 'producttype', 'scheme', 'cardproduct'],
+  client: ['client', 'clientname', 'clientcode', 'customer', 'customername', 'company', 'principal', 'owner', 'account', 'accountname'],
+  cardholderRef: ['cardholderref', 'cardholderid', 'crewid', 'crewno', 'crewnumber', 'employeeid', 'employeeno', 'employeenumber', 'staffid', 'seafarerid', 'holderref', 'holderid', 'personnelno'],
   location: ['location', 'vessel', 'vesselname', 'ship', 'office', 'site', 'branch', 'holder', 'currentlocation', 'locationname', 'depot', 'warehouse'],
   status: ['status', 'cardstatus', 'state', 'condition'],
   batchRef: ['batch', 'batchno', 'batchref', 'batchnumber', 'shipment', 'shipmentref', 'lot', 'lotno', 'consignment'],
   expiryDate: ['expiry', 'expirydate', 'expdate', 'expires', 'validthru', 'validuntil', 'expiration'],
   issuedTo: ['issuedto', 'assignedto', 'crew', 'crewname', 'holdername', 'employee', 'recipient', 'seafarer'],
   issuedAt: ['issuedate', 'issueddate', 'issuedon', 'dateissued', 'distributiondate', 'handoverdate'],
-  activatedAt: ['activationdate', 'activateddate', 'activatedon', 'dateactivated', 'activation'],
+  registeredAt: ['registrationdate', 'registereddate', 'registeredon', 'dateregistered', 'registration', 'activationdate', 'activateddate', 'activatedon', 'dateactivated', 'activation'],
   notes: ['notes', 'remarks', 'comment', 'comments', 'observation'],
 };
 
@@ -82,12 +86,14 @@ const STATUS_SYNONYMS: Record<string, CardStatus> = {
   intransit: 'IN_TRANSIT', transit: 'IN_TRANSIT', shipped: 'IN_TRANSIT', dispatched: 'IN_TRANSIT',
   onboardship: 'IN_TRANSIT', sent: 'IN_TRANSIT', courier: 'IN_TRANSIT',
   issued: 'ISSUED', distributed: 'ISSUED', assigned: 'ISSUED', allocated: 'ISSUED', handedover: 'ISSUED',
-  activated: 'ACTIVATED', active: 'ACTIVATED', inuse: 'ACTIVATED', live: 'ACTIVATED', loaded: 'ACTIVATED',
+  registered: 'REGISTERED', activated: 'REGISTERED', active: 'REGISTERED', inuse: 'REGISTERED',
+  live: 'REGISTERED', loaded: 'REGISTERED', enrolled: 'REGISTERED', kycd: 'REGISTERED',
   returned: 'RETURNED', returnedtostock: 'RETURNED', recovered: 'RETURNED', handedback: 'RETURNED',
   lost: 'LOST', missing: 'LOST', unaccounted: 'LOST', stolen: 'LOST',
   damaged: 'DAMAGED', defective: 'DAMAGED', faulty: 'DAMAGED', broken: 'DAMAGED',
   expired: 'EXPIRED', lapsed: 'EXPIRED',
-  destroyed: 'DESTROYED', shredded: 'DESTROYED', disposed: 'DESTROYED', voided: 'DESTROYED', cancelled: 'DESTROYED',
+  disposed: 'DISPOSED', destroyed: 'DISPOSED', shredded: 'DISPOSED', voided: 'DISPOSED',
+  cancelled: 'DISPOSED', scrapped: 'DISPOSED', incinerated: 'DISPOSED',
 };
 
 export function normaliseStatus(raw: string): CardStatus | null {

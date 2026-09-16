@@ -22,6 +22,10 @@ export default async function CardsPage({ searchParams }: { searchParams: Search
   const status = first(sp.status);
   const location = first(sp.location);
   const type = first(sp.type);
+  const clientId = first(sp.client);
+  const issuerId = first(sp.issuer);
+  const orderId = first(sp.order);
+  const holderId = first(sp.cardholder);
   const stale = first(sp.stale) === '1';
   const page = Math.max(1, Number(first(sp.page)) || 1);
 
@@ -38,6 +42,10 @@ export default async function CardsPage({ searchParams }: { searchParams: Search
   if (location === 'none') where.locationId = null;
   else if (location) where.locationId = location;
   if (type) where.cardTypeId = type;
+  if (clientId) where.clientId = clientId;
+  if (issuerId) where.cardType = { issuerId };
+  if (holderId) where.cardholderId = holderId;
+  if (orderId) where.orderLine = { orderId };
   if (stale) {
     where.OR = [
       ...(where.OR ? [{ OR: where.OR }] : []),
@@ -54,10 +62,15 @@ export default async function CardsPage({ searchParams }: { searchParams: Search
     }
   }
 
-  const [cards, total, locations, cardTypes] = await Promise.all([
+  const [cards, total, locations, cardTypes, clients, issuers, cardholders] = await Promise.all([
     prisma.card.findMany({
       where,
-      include: { cardType: { select: { name: true } }, location: { select: { id: true, name: true } } },
+      include: {
+        cardType: { select: { name: true, issuer: { select: { name: true } } } },
+        location: { select: { id: true, name: true } },
+        client: { select: { id: true, name: true } },
+        cardholder: { select: { id: true, firstName: true, lastName: true } },
+      },
       orderBy: [{ updatedAt: 'desc' }],
       skip: (page - 1) * PAGE_SIZE,
       take: PAGE_SIZE,
@@ -65,6 +78,14 @@ export default async function CardsPage({ searchParams }: { searchParams: Search
     prisma.card.count({ where }),
     prisma.location.findMany({ where: { isActive: true }, orderBy: { name: 'asc' }, select: { id: true, name: true, code: true } }),
     prisma.cardType.findMany({ orderBy: { name: 'asc' }, select: { id: true, name: true } }),
+    prisma.client.findMany({ where: { isActive: true }, orderBy: { name: 'asc' }, select: { id: true, name: true } }),
+    prisma.issuer.findMany({ where: { isActive: true }, orderBy: { name: 'asc' }, select: { id: true, name: true } }),
+    prisma.cardholder.findMany({
+      where: { isActive: true, ...(clientId ? { clientId } : {}) },
+      orderBy: [{ lastName: 'asc' }],
+      take: 500,
+      select: { id: true, firstName: true, lastName: true, ref: true },
+    }),
   ]);
 
   const rows: CardRow[] = cards.map((c) => {
@@ -77,6 +98,11 @@ export default async function CardsPage({ searchParams }: { searchParams: Search
       batchRef: c.batchRef,
       issuedTo: c.issuedTo,
       cardTypeName: c.cardType.name,
+      issuerName: c.cardType.issuer.name,
+      clientName: c.client?.name ?? null,
+      clientId: c.client?.id ?? null,
+      cardholderName: c.cardholder ? `${c.cardholder.lastName}, ${c.cardholder.firstName}` : null,
+      cardholderId: c.cardholder?.id ?? null,
       locationName: c.location?.name ?? null,
       locationId: c.location?.id ?? null,
       expiryDate: c.expiryDate ? formatDate(c.expiryDate) : null,
@@ -88,7 +114,17 @@ export default async function CardsPage({ searchParams }: { searchParams: Search
 
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const exportParams = new URLSearchParams();
-  for (const [k, v] of Object.entries({ q, status, location, type, stale: stale ? '1' : '' })) {
+  for (const [k, v] of Object.entries({
+    q,
+    status,
+    location,
+    type,
+    client: clientId,
+    issuer: issuerId,
+    order: orderId,
+    cardholder: holderId,
+    stale: stale ? '1' : '',
+  })) {
     if (v) exportParams.set(k, v);
   }
 
@@ -96,7 +132,7 @@ export default async function CardsPage({ searchParams }: { searchParams: Search
     <>
       <PageHeader
         title="Cards"
-        description={`${formatNumber(total)} card(s) match. Select rows to move stock between locations or change status in bulk — every change is written to the movement ledger.`}
+        description={`${formatNumber(total)} card(s) match. Select rows to move stock, issue to a cardholder, or change status in bulk — every change is written to the movement ledger.`}
         action={
           <div className="flex gap-2">
             <Link href={`/api/export/cards?${exportParams.toString()}`} className="btn-secondary">
@@ -110,8 +146,22 @@ export default async function CardsPage({ searchParams }: { searchParams: Search
       />
 
       <Panel className="mb-4">
-        <form className="grid gap-2 p-4 md:grid-cols-6">
+        <form className="grid gap-2 p-4 md:grid-cols-4 xl:grid-cols-8">
+          {orderId && <input type="hidden" name="order" value={orderId} />}
+          {holderId && <input type="hidden" name="cardholder" value={holderId} />}
           <input name="q" className="input md:col-span-2" placeholder="Serial, proxy, batch or holder…" defaultValue={q} />
+          <select name="client" className="input" defaultValue={clientId}>
+            <option value="">Any client</option>
+            {clients.map((c) => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+          <select name="issuer" className="input" defaultValue={issuerId}>
+            <option value="">Any issuer</option>
+            {issuers.map((i) => (
+              <option key={i.id} value={i.id}>{i.name}</option>
+            ))}
+          </select>
           <select name="status" className="input" defaultValue={status}>
             <option value="">Any status</option>
             {CARD_STATUSES.map((s) => (
@@ -149,7 +199,11 @@ export default async function CardsPage({ searchParams }: { searchParams: Search
             action={<Link href="/import" className="btn-primary">Import spreadsheet</Link>}
           />
         ) : (
-          <CardsTable rows={rows} locations={locations} />
+          <CardsTable
+            rows={rows}
+            locations={locations}
+            cardholders={cardholders.map((h) => ({ id: h.id, label: `${h.lastName}, ${h.firstName} (${h.ref})` }))}
+          />
         )}
       </Panel>
 

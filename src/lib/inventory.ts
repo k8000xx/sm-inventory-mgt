@@ -4,18 +4,30 @@ import { ON_HAND_STATUSES, type CardStatus, type MovementType } from '@/lib/cons
 
 export type TxClient = Prisma.TransactionClient;
 
-export type CardChange = {
+/** Scalar fields a change may set. Relations are handled separately below. */
+const SCALAR_KEYS = [
+  'issuedTo',
+  'issuedAt',
+  'registeredAt',
+  'deliveredAt',
+  'disposedAt',
+  'disposalReason',
+  'expiryDate',
+  'batchRef',
+  'notes',
+  'maskedPan',
+  'proxy',
+] as const;
+
+type ScalarKey = (typeof SCALAR_KEYS)[number];
+
+export type CardChange = Partial<Pick<Card, ScalarKey>> & {
   locationId?: string | null;
-  status?: CardStatus;
-  issuedTo?: string | null;
-  issuedAt?: Date | null;
-  activatedAt?: Date | null;
-  expiryDate?: Date | null;
-  batchRef?: string | null;
-  notes?: string | null;
-  maskedPan?: string | null;
-  proxy?: string | null;
+  clientId?: string | null;
+  cardholderId?: string | null;
   cardTypeId?: string;
+  orderLineId?: string | null;
+  status?: CardStatus;
   /** Set when a human physically laid eyes on the card. */
   verified?: { by: string; at?: Date };
 };
@@ -28,7 +40,16 @@ export type MovementContext = {
   occurredAt?: Date;
   importBatchId?: string | null;
   stockCountId?: string | null;
+  cardOrderId?: string | null;
+  deliveryId?: string | null;
+  disposalId?: string | null;
+  registrationBatchId?: string | null;
 };
+
+function sameValue(a: unknown, b: unknown): boolean {
+  if (a instanceof Date && b instanceof Date) return a.getTime() === b.getTime();
+  return a === b;
+}
 
 /**
  * Apply a change to a card and write the matching ledger entry in the same
@@ -44,17 +65,14 @@ export async function applyCardChange(
   change: CardChange,
   ctx: MovementContext,
 ): Promise<Card | null> {
-  const data: Prisma.CardUpdateInput = {};
+  const data: Prisma.CardUncheckedUpdateInput = {};
   let touched = false;
 
-  const locationChanged =
-    change.locationId !== undefined && change.locationId !== card.locationId;
+  const locationChanged = change.locationId !== undefined && change.locationId !== card.locationId;
   const statusChanged = change.status !== undefined && change.status !== card.status;
 
   if (locationChanged) {
-    data.location = change.locationId
-      ? { connect: { id: change.locationId } }
-      : { disconnect: true };
+    data.locationId = change.locationId;
     touched = true;
   }
   if (statusChanged) {
@@ -62,33 +80,19 @@ export async function applyCardChange(
     touched = true;
   }
 
-  const scalarKeys = [
-    'issuedTo',
-    'issuedAt',
-    'activatedAt',
-    'expiryDate',
-    'batchRef',
-    'notes',
-    'maskedPan',
-    'proxy',
-  ] as const;
-
-  for (const key of scalarKeys) {
+  // Other foreign keys carry no ledger semantics of their own, so they are
+  // treated like plain fields.
+  for (const key of ['clientId', 'cardholderId', 'cardTypeId', 'orderLineId'] as const) {
     const incoming = change[key];
-    if (incoming === undefined) continue;
-    const current = card[key];
-    const same =
-      current instanceof Date && incoming instanceof Date
-        ? current.getTime() === incoming.getTime()
-        : current === incoming;
-    if (!same) {
-      (data as Record<string, unknown>)[key] = incoming;
-      touched = true;
-    }
+    if (incoming === undefined || incoming === card[key]) continue;
+    (data as Record<string, unknown>)[key] = incoming;
+    touched = true;
   }
 
-  if (change.cardTypeId !== undefined && change.cardTypeId !== card.cardTypeId) {
-    data.cardType = { connect: { id: change.cardTypeId } };
+  for (const key of SCALAR_KEYS) {
+    const incoming = change[key];
+    if (incoming === undefined || sameValue(card[key], incoming)) continue;
+    (data as Record<string, unknown>)[key] = incoming;
     touched = true;
   }
 
@@ -116,31 +120,41 @@ export async function applyCardChange(
       occurredAt: ctx.occurredAt ?? new Date(),
       importBatchId: ctx.importBatchId ?? null,
       stockCountId: ctx.stockCountId ?? null,
+      cardOrderId: ctx.cardOrderId ?? null,
+      deliveryId: ctx.deliveryId ?? null,
+      disposalId: ctx.disposalId ?? null,
+      registrationBatchId: ctx.registrationBatchId ?? null,
     },
   });
 
   return updated;
 }
 
+export type NewCardInput = {
+  serial: string;
+  cardTypeId: string;
+  status: CardStatus;
+  clientId?: string | null;
+  locationId?: string | null;
+  cardholderId?: string | null;
+  orderLineId?: string | null;
+  maskedPan?: string | null;
+  proxy?: string | null;
+  batchRef?: string | null;
+  expiryDate?: Date | null;
+  issuedTo?: string | null;
+  issuedAt?: Date | null;
+  registeredAt?: Date | null;
+  deliveredAt?: Date | null;
+  notes?: string | null;
+  lastVerifiedAt?: Date | null;
+  lastVerifiedBy?: string | null;
+};
+
 /** Create a card and open its ledger with an initial entry. */
 export async function createCardWithMovement(
   tx: TxClient,
-  input: {
-    serial: string;
-    cardTypeId: string;
-    status: CardStatus;
-    locationId?: string | null;
-    maskedPan?: string | null;
-    proxy?: string | null;
-    batchRef?: string | null;
-    expiryDate?: Date | null;
-    issuedTo?: string | null;
-    issuedAt?: Date | null;
-    activatedAt?: Date | null;
-    notes?: string | null;
-    lastVerifiedAt?: Date | null;
-    lastVerifiedBy?: string | null;
-  },
+  input: NewCardInput,
   ctx: MovementContext,
 ): Promise<Card> {
   const card = await tx.card.create({ data: input });
@@ -157,6 +171,10 @@ export async function createCardWithMovement(
       occurredAt: ctx.occurredAt ?? new Date(),
       importBatchId: ctx.importBatchId ?? null,
       stockCountId: ctx.stockCountId ?? null,
+      cardOrderId: ctx.cardOrderId ?? null,
+      deliveryId: ctx.deliveryId ?? null,
+      disposalId: ctx.disposalId ?? null,
+      registrationBatchId: ctx.registrationBatchId ?? null,
     },
   });
 
@@ -182,10 +200,7 @@ export async function transferCards(input: {
       const result = await applyCardChange(
         tx,
         card,
-        {
-          locationId: toLocationId,
-          status: markInTransit ? 'IN_TRANSIT' : undefined,
-        },
+        { locationId: toLocationId, status: markInTransit ? 'IN_TRANSIT' : undefined },
         { type: 'TRANSFER', actor, reference, notes },
       );
       if (result) changed += 1;
@@ -214,6 +229,47 @@ export async function setCardStatuses(input: {
         card,
         { status },
         { type: 'STATUS_CHANGE', actor, reference, notes },
+      );
+      if (result) changed += 1;
+    }
+    return changed;
+  });
+}
+
+/**
+ * Hand cards to a cardholder. Issuing does not make a card live — registration
+ * does — but it does take it off the shelf.
+ */
+export async function issueCards(input: {
+  cardIds: string[];
+  cardholderId: string;
+  actor: string;
+  issuedAt?: Date;
+  reference?: string | null;
+  notes?: string | null;
+}): Promise<number> {
+  const { cardIds, cardholderId, actor, issuedAt, reference, notes } = input;
+  if (cardIds.length === 0) return 0;
+
+  return prisma.$transaction(async (tx) => {
+    const holder = await tx.cardholder.findUnique({ where: { id: cardholderId } });
+    if (!holder) throw new Error('That cardholder no longer exists.');
+
+    const cards = await tx.card.findMany({ where: { id: { in: cardIds } } });
+    let changed = 0;
+    for (const card of cards) {
+      const result = await applyCardChange(
+        tx,
+        card,
+        {
+          cardholderId,
+          clientId: card.clientId ?? holder.clientId,
+          // A card already registered stays registered; issuing only records who holds it.
+          status: card.status === 'REGISTERED' ? undefined : 'ISSUED',
+          issuedTo: `${holder.firstName} ${holder.lastName}`.trim(),
+          issuedAt: issuedAt ?? new Date(),
+        },
+        { type: 'ISSUE', actor, reference, notes },
       );
       if (result) changed += 1;
     }

@@ -9,6 +9,7 @@ const schema = z.object({
   code: z.string().trim().min(1, 'Code is required').max(40),
   name: z.string().trim().min(1, 'Name is required').max(160),
   type: z.enum(LOCATION_TYPES),
+  clientId: z.string().trim().optional(),
   region: z.string().trim().max(80).optional(),
   vesselImo: z.string().trim().max(40).optional(),
   contactName: z.string().trim().max(120).optional(),
@@ -25,6 +26,7 @@ function readForm(formData: FormData) {
     code: formData.get('code'),
     name: formData.get('name'),
     type: formData.get('type'),
+    clientId: formData.get('clientId') || undefined,
     region: formData.get('region') || undefined,
     vesselImo: formData.get('vesselImo') || undefined,
     contactName: formData.get('contactName') || undefined,
@@ -42,8 +44,10 @@ export async function createLocation(_prev: ActionState, formData: FormData): Pr
   const exists = await prisma.location.findUnique({ where: { code: parsed.data.code } });
   if (exists) return { error: `Location code "${parsed.data.code}" is already in use.` };
 
-  const { contactEmail, ...rest } = parsed.data;
-  await prisma.location.create({ data: { ...rest, contactEmail: contactEmail || null } });
+  const { contactEmail, clientId, ...rest } = parsed.data;
+  await prisma.location.create({
+    data: { ...rest, contactEmail: contactEmail || null, clientId: clientId || null },
+  });
   revalidatePath('/locations');
   revalidatePath('/');
   return { success: `Added ${parsed.data.name}.` };
@@ -62,10 +66,10 @@ export async function updateLocation(
   });
   if (clash) return { error: `Location code "${parsed.data.code}" is already in use.` };
 
-  const { contactEmail, ...rest } = parsed.data;
+  const { contactEmail, clientId, ...rest } = parsed.data;
   await prisma.location.update({
     where: { id },
-    data: { ...rest, contactEmail: contactEmail || null },
+    data: { ...rest, contactEmail: contactEmail || null, clientId: clientId || null },
   });
   revalidatePath('/locations');
   revalidatePath(`/locations/${id}`);

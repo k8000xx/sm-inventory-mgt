@@ -10,6 +10,7 @@ export type LocationFormValues = {
   code?: string;
   name?: string;
   type?: string;
+  clientId?: string | null;
   region?: string | null;
   vesselImo?: string | null;
   contactName?: string | null;
@@ -31,10 +32,12 @@ function Submit({ label }: { label: string }) {
 export function LocationForm({
   action,
   values,
+  clients,
   submitLabel,
 }: {
   action: (prev: ActionState, formData: FormData) => Promise<ActionState>;
   values?: LocationFormValues;
+  clients: { id: string; name: string; code: string }[];
   submitLabel: string;
 }) {
   const [state, formAction] = useActionState<ActionState, FormData>(action, {});
@@ -62,6 +65,19 @@ export function LocationForm({
       <div>
         <label className="label" htmlFor="loc-name">Name</label>
         <input id="loc-name" name="name" className="input" defaultValue={values?.name} placeholder="MV Aurora" required />
+      </div>
+
+      <div>
+        <label className="label" htmlFor="loc-client">Client</label>
+        <select id="loc-client" name="clientId" className="input" defaultValue={values?.clientId ?? ''}>
+          <option value="">None — our own site</option>
+          {clients.map((c) => (
+            <option key={c.id} value={c.id}>{c.name} ({c.code})</option>
+          ))}
+        </select>
+        <p className="mt-1 text-xs text-slate-500">
+          Vessels belong to a client. Leave blank for your own warehouses and offices.
+        </p>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2">

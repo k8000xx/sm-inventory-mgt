@@ -5,6 +5,8 @@ import { useFormStatus } from 'react-dom';
 import { createCardType, type ActionState } from './actions';
 import { Alert } from '@/components/ui';
 
+type Issuer = { id: string; name: string; code: string };
+
 function Submit() {
   const { pending } = useFormStatus();
   return (
@@ -14,7 +16,7 @@ function Submit() {
   );
 }
 
-export function CardTypeForm() {
+export function CardTypeForm({ issuers }: { issuers: Issuer[] }) {
   const [state, action] = useActionState<ActionState, FormData>(createCardType, {});
 
   return (
@@ -28,6 +30,19 @@ export function CardTypeForm() {
       <div>
         <label className="label" htmlFor="ct-name">Name</label>
         <input id="ct-name" name="name" className="input" placeholder="USD Reloadable Card" required />
+      </div>
+      <div>
+        <label className="label" htmlFor="ct-issuer">Issuer</label>
+        <select id="ct-issuer" name="issuerId" className="input" defaultValue="" required>
+          <option value="" disabled>Choose…</option>
+          {issuers.map((i) => (
+            <option key={i.id} value={i.id}>{i.name}</option>
+          ))}
+        </select>
+      </div>
+      <div>
+        <label className="label" htmlFor="ct-bin">BIN</label>
+        <input id="ct-bin" name="bin" className="input" placeholder="541050" />
       </div>
       <div>
         <label className="label" htmlFor="ct-currency">Currency</label>

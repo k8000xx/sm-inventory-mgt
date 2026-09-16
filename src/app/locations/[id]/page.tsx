@@ -21,8 +21,14 @@ export const dynamic = 'force-dynamic';
 export default async function LocationDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
 
-  const location = await prisma.location.findUnique({ where: { id } });
+  const location = await prisma.location.findUnique({ where: { id }, include: { client: true } });
   if (!location) notFound();
+
+  const clients = await prisma.client.findMany({
+    where: { isActive: true },
+    orderBy: { name: 'asc' },
+    select: { id: true, name: true, code: true },
+  });
 
   const [byStatus, verifiedAgg, recentCards, movements, counts] = await Promise.all([
     prisma.card.groupBy({ by: ['status'], where: { locationId: id }, _count: { _all: true } }),
@@ -60,7 +66,7 @@ export default async function LocationDetailPage({ params }: { params: Promise<{
     <>
       <PageHeader
         title={location.name}
-        description={`${location.code}${location.region ? ` · ${location.region}` : ''}${location.vesselImo ? ` · IMO ${location.vesselImo}` : ''}`}
+        description={`${location.code}${location.client ? ` · ${location.client.name}` : ''}${location.region ? ` · ${location.region}` : ''}${location.vesselImo ? ` · IMO ${location.vesselImo}` : ''}`}
         action={
           <div className="flex gap-2">
             <Link href={`/cards?location=${location.id}`} className="btn-secondary">
@@ -161,6 +167,7 @@ export default async function LocationDetailPage({ params }: { params: Promise<{
             <LocationForm
               action={updateLocation.bind(null, location.id)}
               values={location}
+              clients={clients}
               submitLabel="Save changes"
             />
           </Panel>

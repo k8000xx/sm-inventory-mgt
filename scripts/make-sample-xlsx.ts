@@ -30,42 +30,53 @@ async function main() {
   sheet.addRow([]);
   sheet.getRow(1).font = { bold: true, size: 13 };
 
-  const header = ['Card Serial No.', 'Card Product', 'Vessel / Office', 'Card Status', 'Crew Name', 'Date Issued', 'Valid Thru', 'Batch', 'Remarks'];
+  const header = ['Card Serial No.', 'Card Product', 'Client', 'Vessel / Office', 'Card Status', 'Crew Name', 'Crew No.', 'Date Issued', 'Valid Thru', 'Batch', 'Remarks'];
   sheet.addRow(header).font = { bold: true };
 
   // Existing cards handed out to crew since the last report.
-  const crew = ['A. Santos', 'R. Dela Cruz', 'M. Reyes', 'J. Bautista', 'L. García', 'P. Novak'];
+  const crew = [
+    ['A. Santos', 'CRW-04821'],
+    ['R. Dela Cruz', 'CRW-04822'],
+    ['M. Reyes', 'CRW-04823'],
+    ['J. Bautista', 'CRW-04824'],
+    ['L. García', 'CRW-04825'],
+    ['A. Santos', 'CRW-04821'],
+  ];
   existing.slice(0, 6).forEach((card, i) => {
     sheet.addRow([
       card.serial,
-      'USD Reloadable Card',
+      'Monavate USD Reloadable',
+      'Oceanic Shipping Ltd',
       'MV Aurora',
       'Issued',
-      crew[i],
+      crew[i][0],
+      crew[i][1],
       '15/06/2026',
       '31/12/2028',
-      card.batchRef ?? 'B-54105',
+      card.batchRef ?? 'B-54109',
       'Handed over at crew change',
     ]);
   });
 
   // Existing cards still sitting in the safe.
   existing.slice(6, 10).forEach((card) => {
-    sheet.addRow([card.serial, 'USD Reloadable Card', 'MV Aurora', 'available', '', '', '31/12/2028', card.batchRef ?? 'B-54105', '']);
+    sheet.addRow([card.serial, 'Monavate USD Reloadable', 'Oceanic Shipping Ltd', 'MV Aurora', 'available', '', '', '', '31/12/2028', card.batchRef ?? 'B-54109', '']);
   });
 
   // One that went missing — a status the importer normalises to LOST.
   if (existing[10]) {
-    sheet.addRow([existing[10].serial, 'USD Reloadable Card', 'MV Aurora', 'MISSING', '', '', '31/12/2028', existing[10].batchRef ?? 'B-54105', 'Not found during safe check']);
+    sheet.addRow([existing[10].serial, 'Monavate USD Reloadable', 'Oceanic Shipping Ltd', 'MV Aurora', 'MISSING', '', '', '', '31/12/2028', existing[10].batchRef ?? 'B-54109', 'Not found during safe check']);
   }
 
   // New stock received on board that HQ has not recorded yet.
   for (let i = 1; i <= 8; i += 1) {
     sheet.addRow([
       `54999${String(700000 + i).padStart(9, '0')}`,
-      'USD Reloadable Card',
+      'Monavate USD Reloadable',
+      'Oceanic Shipping Ltd',
       'MV Aurora',
       'In Stock',
+      '',
       '',
       '',
       '30/06/2029',
@@ -76,10 +87,10 @@ async function main() {
 
   // A row for a location the system does not know about, to exercise the
   // "create locations found in the file" option and the error path when it is off.
-  sheet.addRow(['54999700000099', 'USD Reloadable Card', 'MV Southern Cross', 'In Stock', '', '', '30/06/2029', 'B-54999', 'Transferred to sister vessel']);
+  sheet.addRow(['54999700000099', 'Monavate USD Reloadable', 'Oceanic Shipping Ltd', 'MV Southern Cross', 'In Stock', '', '', '', '30/06/2029', 'B-54999', 'Transferred to sister vessel']);
 
   // A row with no serial, which the importer should skip rather than choke on.
-  sheet.addRow(['', 'USD Reloadable Card', 'MV Aurora', 'In Stock', '', '', '', '', 'Damaged in transit — serial unreadable']);
+  sheet.addRow(['', 'Monavate USD Reloadable', 'Oceanic Shipping Ltd', 'MV Aurora', 'In Stock', '', '', '', '', '', 'Damaged in transit — serial unreadable']);
 
   sheet.getColumn(1).numFmt = '@';
   sheet.columns.forEach((c) => { c.width = 22; });

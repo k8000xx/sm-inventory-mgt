@@ -17,6 +17,9 @@ export type ImportOptions = {
   asOfDate: Date;
   defaultLocationId?: string | null;
   defaultCardTypeId?: string | null;
+  defaultClientId?: string | null;
+  /// Card types are issuer-specific, so auto-creating one needs an issuer.
+  defaultIssuerId?: string | null;
   createMissingLocations: boolean;
   createMissingCardTypes: boolean;
   /** Count this file as a physical confirmation of where the cards are. */
@@ -58,6 +61,8 @@ type ResolvedRow = {
   row: number;
   serial: string;
   cardTypeId: string;
+  clientId: string | null | undefined;
+  cardholderId: string | null | undefined;
   locationId: string | null | undefined;
   status: CardStatus | undefined;
   proxy: string | undefined;
@@ -66,7 +71,7 @@ type ResolvedRow = {
   expiryDate: Date | undefined;
   issuedTo: string | undefined;
   issuedAt: Date | undefined;
-  activatedAt: Date | undefined;
+  registeredAt: Date | undefined;
   notes: string | undefined;
 };
 
@@ -85,9 +90,11 @@ export async function runImport(
     throw new Error('The "Card serial" column must be mapped before importing.');
   }
 
-  const [locations, cardTypes] = await Promise.all([
+  const [locations, cardTypes, clients, cardholders] = await Promise.all([
     prisma.location.findMany(),
     prisma.cardType.findMany(),
+    prisma.client.findMany(),
+    prisma.cardholder.findMany({ select: { id: true, ref: true, clientId: true } }),
   ]);
 
   const locationIndex = new Map<string, string>();
@@ -99,6 +106,21 @@ export async function runImport(
   for (const t of cardTypes) {
     cardTypeIndex.set(key(t.code), t.id);
     cardTypeIndex.set(key(t.name), t.id);
+  }
+  const clientIndex = new Map<string, string>();
+  for (const c of clients) {
+    clientIndex.set(key(c.code), c.id);
+    clientIndex.set(key(c.name), c.id);
+  }
+  // Crew references are only unique within a client, so index them per client
+  // and keep a loose index for files that do not name one.
+  const holderByClientRef = new Map<string, string>();
+  const holderByRef = new Map<string, string[]>();
+  for (const h of cardholders) {
+    holderByClientRef.set(`${h.clientId}:${key(h.ref)}`, h.id);
+    const list = holderByRef.get(key(h.ref)) ?? [];
+    list.push(h.id);
+    holderByRef.set(key(h.ref), list);
   }
 
   const cell = (rowValues: string[], field: keyof ColumnMapping): string => {
@@ -146,6 +168,46 @@ export async function runImport(
       }
     } else if (options.defaultLocationId) {
       locationId = options.defaultLocationId;
+    }
+
+    // Client
+    let clientId: string | null | undefined;
+    const clientRaw = cell(values, 'client');
+    if (clientRaw) {
+      const found = clientIndex.get(key(clientRaw));
+      if (!found) {
+        issues.push({ row: rowNumber, serial, level: 'error', message: `Unknown client "${clientRaw}".` });
+        rows.push({ row: rowNumber, serial, action: 'skip', reason: 'Unknown client', changes: [] });
+        return;
+      }
+      clientId = found;
+    } else if (options.defaultClientId) {
+      clientId = options.defaultClientId;
+    }
+
+    // Cardholder — resolved against the row's client where there is one.
+    let cardholderId: string | null | undefined;
+    const holderRaw = cell(values, 'cardholderRef');
+    if (holderRaw) {
+      const scoped = clientId ? holderByClientRef.get(`${clientId}:${key(holderRaw)}`) : undefined;
+      if (scoped) {
+        cardholderId = scoped;
+      } else {
+        const loose = holderByRef.get(key(holderRaw)) ?? [];
+        if (loose.length === 1) {
+          cardholderId = loose[0];
+        } else {
+          issues.push({
+            row: rowNumber,
+            serial,
+            level: 'warning',
+            message:
+              loose.length === 0
+                ? `No cardholder with reference "${holderRaw}" — left unlinked.`
+                : `Cardholder reference "${holderRaw}" matches ${loose.length} people across clients — left unlinked.`,
+          });
+        }
+      }
     }
 
     // Card type
@@ -211,6 +273,8 @@ export async function runImport(
       row: rowNumber,
       serial,
       cardTypeId,
+      clientId,
+      cardholderId,
       locationId,
       status,
       proxy: cell(values, 'proxy') || undefined,
@@ -219,7 +283,7 @@ export async function runImport(
       expiryDate: readDate('expiryDate', 'expiry date'),
       issuedTo: cell(values, 'issuedTo') || undefined,
       issuedAt: readDate('issuedAt', 'issue date'),
-      activatedAt: readDate('activatedAt', 'activation date'),
+      registeredAt: readDate('registeredAt', 'registration date'),
       notes: cell(values, 'notes') || undefined,
     });
   });
@@ -258,6 +322,8 @@ export async function runImport(
 
     const changes: string[] = [];
     if (r.locationId !== undefined && r.locationId !== card.locationId) changes.push('location');
+    if (r.clientId !== undefined && r.clientId !== card.clientId) changes.push('client');
+    if (r.cardholderId !== undefined && r.cardholderId !== card.cardholderId) changes.push('cardholder');
     if (r.status !== undefined && r.status !== card.status) changes.push(`status ${card.status} → ${r.status}`);
     if (r.cardTypeId !== card.cardTypeId) changes.push('card type');
     if (r.proxy !== undefined && r.proxy !== card.proxy) changes.push('proxy');
@@ -265,7 +331,7 @@ export async function runImport(
     if (r.batchRef !== undefined && r.batchRef !== card.batchRef) changes.push('batch');
     if (r.issuedTo !== undefined && r.issuedTo !== card.issuedTo) changes.push('issued to');
     if (r.notes !== undefined && r.notes !== card.notes) changes.push('notes');
-    for (const [field, label] of [['expiryDate', 'expiry'], ['issuedAt', 'issue date'], ['activatedAt', 'activation date']] as const) {
+    for (const [field, label] of [['expiryDate', 'expiry'], ['issuedAt', 'issue date'], ['registeredAt', 'registration date']] as const) {
       const incoming = r[field];
       const current = card[field];
       if (incoming && incoming.getTime() !== (current?.getTime() ?? -1)) changes.push(label);
@@ -334,11 +400,17 @@ export async function runImport(
         placeholderLocations.set(`NEW:${key(name)}`, created.id);
       }
       const placeholderTypes = new Map<string, string>();
+      if (newCardTypeNames.size > 0 && !options.defaultIssuerId) {
+        throw new Error(
+          'Card types belong to an issuer, so choose the issuer to create them under before importing.',
+        );
+      }
       for (const name of newCardTypeNames) {
         const created = await tx.cardType.create({
           data: {
             code: await uniqueCode(tx, 'cardType', name),
             name,
+            issuerId: options.defaultIssuerId!,
             description: `Created automatically from import "${options.filename}".`,
           },
         });
@@ -362,15 +434,19 @@ export async function runImport(
           {
             serial: r.serial,
             cardTypeId: realType(r.cardTypeId),
-            status: r.status ?? 'IN_STOCK',
+            clientId: r.clientId ?? null,
+            // A registration date in the file means the card is live, whatever
+            // the status column says.
+            status: r.registeredAt ? 'REGISTERED' : r.status ?? 'IN_STOCK',
             locationId: realLocation(r.locationId) ?? null,
             proxy: r.proxy ?? null,
             maskedPan: r.maskedPan ?? null,
             batchRef: r.batchRef ?? null,
             expiryDate: r.expiryDate ?? null,
+            cardholderId: r.cardholderId ?? null,
             issuedTo: r.issuedTo ?? null,
             issuedAt: r.issuedAt ?? null,
-            activatedAt: r.activatedAt ?? null,
+            registeredAt: r.registeredAt ?? null,
             notes: r.notes ?? null,
             lastVerifiedAt: options.markVerified ? options.asOfDate : null,
             lastVerifiedBy: options.markVerified ? options.actor : null,
@@ -386,7 +462,9 @@ export async function runImport(
           card,
           {
             locationId: r.locationId === undefined ? undefined : realLocation(r.locationId) ?? null,
-            status: r.status,
+            clientId: r.clientId,
+            cardholderId: r.cardholderId,
+            status: r.registeredAt ? 'REGISTERED' : r.status,
             cardTypeId: realType(r.cardTypeId),
             proxy: r.proxy,
             maskedPan: r.maskedPan,
@@ -394,7 +472,7 @@ export async function runImport(
             expiryDate: r.expiryDate,
             issuedTo: r.issuedTo,
             issuedAt: r.issuedAt,
-            activatedAt: r.activatedAt,
+            registeredAt: r.registeredAt,
             notes: r.notes,
             verified: options.markVerified ? { by: options.actor, at: options.asOfDate } : undefined,
           },
